@@ -114,9 +114,6 @@ class Trashbin {
 		$timestamp = time();
 
 		$userTrashSize = self::getTrashbinSize($user);
-		if ($userTrashSize === false || $userTrashSize < 0) {
-			$userTrashSize = self::calculateSize(new \OC\Files\View('/' . $user . '/files_trashbin'));
-		}
 
 		// disable proxy to prevent recursive calls
 		$proxyStatus = \OC_FileProxy::$enabled;
@@ -150,17 +147,12 @@ class Trashbin {
 
 		$userTrashSize += $size;
 		$userTrashSize -= self::expire($userTrashSize, $user);
-		self::setTrashbinSize($user, $userTrashSize);
 
 		// if owner !== user we also need to update the owners trash size
 		if($owner !== $user) {
 			$ownerTrashSize = self::getTrashbinSize($owner);
-			if ($ownerTrashSize === false || $ownerTrashSize < 0) {
-				$ownerTrashSize = self::calculateSize(new \OC\Files\View('/' . $owner . '/files_trashbin'));
-			}
 			$ownerTrashSize += $size;
 			$ownerTrashSize -= self::expire($ownerTrashSize, $owner);
-			self::setTrashbinSize($owner, $ownerTrashSize);
 		}
 	}
 
@@ -322,9 +314,6 @@ class Trashbin {
 		$view = new \OC\Files\View('/' . $user);
 
 		$trashbinSize = self::getTrashbinSize($user);
-		if ($trashbinSize === false || $trashbinSize < 0) {
-			$trashbinSize = self::calculateSize(new \OC\Files\View('/' . $user . '/files_trashbin'));
-		}
 		$location = '';
 		if ($timestamp) {
 			$query = \OC_DB::prepare('SELECT `location` FROM `*PREFIX*files_trash`'
@@ -378,8 +367,6 @@ class Trashbin {
 				$query = \OC_DB::prepare('DELETE FROM `*PREFIX*files_trash` WHERE `user`=? AND `id`=? AND `timestamp`=?');
 				$query->execute(array($user, $filename, $timestamp));
 			}
-
-			self::setTrashbinSize($user, $trashbinSize);
 
 			// enable proxy
 			\OC_FileProxy::$enabled = $proxyStatus;
@@ -564,7 +551,6 @@ class Trashbin {
 		$user = \OCP\User::getUser();
 		$view = new \OC\Files\View('/' . $user);
 		$view->deleteAll('files_trashbin');
-		self::setTrashbinSize($user, 0);
 		$query = \OC_DB::prepare('DELETE FROM `*PREFIX*files_trash` WHERE `user`=?');
 		$query->execute(array($user));
 
@@ -586,9 +572,6 @@ class Trashbin {
 		$size = 0;
 
 		$trashbinSize = self::getTrashbinSize($user);
-		if ($trashbinSize === false || $trashbinSize < 0) {
-			$trashbinSize = self::calculateSize(new \OC\Files\View('/' . $user . '/files_trashbin'));
-		}
 
 		if ($timestamp) {
 			$query = \OC_DB::prepare('DELETE FROM `*PREFIX*files_trash` WHERE `user`=? AND `id`=? AND `timestamp`=?');
@@ -609,7 +592,6 @@ class Trashbin {
 		$view->unlink('/files_trashbin/files/' . $file);
 		\OC_Hook::emit('\OCP\Trashbin', 'delete', array('path' => '/files_trashbin/files/' . $file));
 		$trashbinSize -= $size;
-		self::setTrashbinSize($user, $trashbinSize);
 
 		return $size;
 	}
@@ -755,17 +737,10 @@ class Trashbin {
 
 		$size = self::getTrashbinSize($user);
 
-		if ($size === false || $size < 0) {
-			$size = self::calculateSize(new \OC\Files\View('/' . $user . '/files_trashbin'));
-		}
-
 		$freeSpace = self::calculateFreeSpace($size);
 
 		if ($freeSpace < 0) {
-			$newSize = $size - self::expire($size, $user);
-			if ($newSize !== $size) {
-				self::setTrashbinSize($user, $newSize);
-			}
+			self::expire($size, $user);
 		}
 	}
 
@@ -942,28 +917,9 @@ class Trashbin {
 	 * @return mixed trash bin size or false if no trash bin size is stored
 	 */
 	private static function getTrashbinSize($user) {
-		$query = \OC_DB::prepare('SELECT `size` FROM `*PREFIX*files_trashsize` WHERE `user`=?');
-		$result = $query->execute(array($user))->fetchAll();
-
-		if ($result) {
-			return (int)$result[0]['size'];
-		}
-		return false;
-	}
-
-	/**
-	 * write to the database how much space is in use for the trash bin
-	 *
-	 * @param $user owner of the trash bin
-	 * @param $size size of the trash bin
-	 */
-	private static function setTrashbinSize($user, $size) {
-		if (self::getTrashbinSize($user) === false) {
-			$query = \OC_DB::prepare('INSERT INTO `*PREFIX*files_trashsize` (`size`, `user`) VALUES (?, ?)');
-		} else {
-			$query = \OC_DB::prepare('UPDATE `*PREFIX*files_trashsize` SET `size`=? WHERE `user`=?');
-		}
-		$query->execute(array($size, $user));
+		$view = new \OC\Files\View('/' . $user);
+		$fileInfo = $view->getFileInfo('/files_trashbin');
+		return $fileInfo['size'];
 	}
 
 	/**
